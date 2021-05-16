@@ -1,0 +1,64 @@
+actions {
+    Send, Accept, Reject, StartFile, FileData, EndFile, Finish
+}
+
+proc Receiver {
+    act { Send?, Accept!, Reject!, StartFile?, FileData?, EndFile?, Finish? }
+    Send?
+    case {
+        Reject! => {}
+        Accept! => {
+            StartFile?
+            loop {
+                FileData?
+                while {
+                    FileData? => {}
+                    EndFile? => break
+                }
+
+                // next file or finish
+                case {
+                    Finish? => break
+                    StartFile? => {}
+                }
+            }
+        }
+    }
+
+    // close
+    tau
+}
+
+proc Sender {
+    act { Send!, Accept?, Reject?, StartFile!, FileData!, EndFile!, Finish! }
+    Send!
+    case {
+        Reject? => {}
+        Accept? => {
+            StartFile!
+            loop {
+                FileData!
+                while {
+                    FileData! => {}
+                    EndFile! => break
+                }
+
+                // next file or finish
+                case {
+                    StartFile! => {}
+                    Finish! => break
+                }
+            }
+        }
+    }
+
+    // close
+    tau
+}
+
+init {
+    sys r = Receiver()
+    sys c = Sender()
+    sys prod = product(r, c)
+    sys comp = prune(prod)
+}
