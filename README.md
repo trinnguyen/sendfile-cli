@@ -24,14 +24,13 @@ stateDiagram-v2
     [*] --> Init
     Init --> InternalAnswer: Send?
     InternalAnswer --> Finish: Reject!
-    InternalAnswer --> Accept: Accept!
-    Accept --> StartReceivingFile: StartFile?
+    InternalAnswer --> WaitForFile: Accept!
+    WaitForFile --> StartReceivingFile: StartFile?
     StartReceivingFile --> ReceiveFileData: FileData?
     ReceiveFileData --> ReceiveFileData: FileData?
     ReceiveFileData --> EndReceivingFile: EndFile?
     EndReceivingFile --> StartReceivingFile: StartFile?
     EndReceivingFile --> Finish: Finish?
-    Finish --> Init: tau
 ```
 
 ### Sender (or client)
@@ -47,5 +46,4 @@ stateDiagram-v2
     SendFileData --> EndSendingFile: EndFile!
     EndSendingFile --> StartSendingFile: StartFile!
     EndSendingFile --> Finish: Finish!
-    Finish --> Init: tau
 ```
