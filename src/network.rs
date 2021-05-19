@@ -10,23 +10,39 @@ use rustls::{
     Stream,
 };
 
-pub struct TcpServer {
+pub struct PlainTcpStream {
+    str: TcpStream
+}
+
+impl PlainTcpStream {
+
+    pub fn new_client(port: u32) -> Self {
+        let str = TcpStream::connect(Network::get_addr(port)).unwrap();
+        PlainTcpStream::new(str)
+    }
+
+    pub fn new(str: TcpStream) -> Self {
+        PlainTcpStream { str }
+    }
+
+    pub fn get_stream(&self) -> &TcpStream {
+        &self.str
+    }
+}
+
+pub struct TlsTcpServer {
     str: TcpStream,
     conn: ServerConnection,
 }
 
-impl TcpServer {
-    
-    pub fn create_tcp_listener(port: u32) -> TcpListener {
-        TcpListener::bind(Network::get_addr(port)).expect("cannot start TCP")
-    }
+impl TlsTcpServer {
 
     pub fn new(str: TcpStream) -> Self {
         // create config
         let mut config =
             ServerConfig::with_cipher_suites(NoClientAuth::new(), rustls::ALL_CIPHERSUITES);
-        let certs = TcpServer::load_certs("certs/server-cert.pem");
-        let privkey = TcpServer::load_private_key("certs/server-key.pem");
+        let certs = TlsTcpServer::load_certs("certs/server-cert.pem");
+        let privkey = TlsTcpServer::load_private_key("certs/server-key.pem");
         config
             .set_single_cert(certs, privkey)
             .expect("bad certificates/private key");
@@ -39,7 +55,7 @@ impl TcpServer {
         Self { str, conn }
     }
 
-    pub fn get_tls_str(&mut self) -> Stream<ServerConnection, TcpStream> {
+    pub fn create_tls_str(&mut self) -> Stream<ServerConnection, TcpStream> {
         Stream::new(&mut self.conn, &mut self.str)
     }
 
@@ -73,12 +89,12 @@ impl TcpServer {
     }
 }
 
-pub struct TcpClient {
+pub struct TlsTcpClient {
     str: TcpStream,
     conn: ClientConnection,
 }
 
-impl TcpClient {
+impl TlsTcpClient {
     pub fn connect(port: u32) -> Self {
         let str = TcpStream::connect(Network::get_addr(port)).unwrap();
         let certfile = fs::File::open("certs/ca-cert.pem").expect("Cannot open CA file");
@@ -107,6 +123,10 @@ impl TcpClient {
 pub struct Network {}
 
 impl<'a> Network {
+    pub fn create_tcp_listener(port: u32) -> TcpListener {
+        TcpListener::bind(Network::get_addr(port)).expect("cannot start TCP")
+    }
+
     fn get_addr(port: u32) -> String {
         format!("0.0.0.0:{}", port)
     }

@@ -1,8 +1,14 @@
-use std::{io::{Result, Read, Write}, net::TcpStream, usize};
 
-use rustls::{ClientConnection, Stream};
-
-use crate::{common::{FileInfo, PacketAsBytes, ParsePacket}, packet::{accept::AcceptPacket, end_file::EndFilePacket, file_data::FileDataPacket, finish::FinishPacket, reject::RejectPacket, send::SendPacket, start_file::StartFilePacket, util::Util}};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader, Read, Write},
+    usize,
+};
+use crate::streamer::Streamer;
+use crate::packet::file_info::FileInfo;
+use crate::packet::packet::Packet;
+use crate::packet::start_file::StartFileData;
+use std::path::PathBuf;
 
 enum ClientState {
     Init, // ask for sending files
@@ -12,23 +18,27 @@ enum ClientState {
     SendFileData,
     EndSendingFile,
     Finish,
-    Error
+    Error,
 }
 
-pub struct ClientStateMachine<'a> {
+pub struct ClientStateMachine<S> where S: Read + Write {
     state: ClientState,
-    tls: Stream<'a, ClientConnection, TcpStream>,
-    vec_file_info: Vec<FileInfo>,
-    current_file: usize
+    str: Streamer<S>,
+    items: Vec<PathBuf>,
+    opt_reader: Option<BufReader<File>>,
+    sent_size: usize,
+    cur_index: usize,
 }
 
-impl <'a> ClientStateMachine<'a> {
-    pub fn new(tls: Stream<'a, ClientConnection, TcpStream>, vec_file_info: Vec<FileInfo>) -> Self {
+impl<S> ClientStateMachine<S> where S: Read + Write {
+    pub fn new(s: S, items: &[PathBuf]) -> Self {
         ClientStateMachine {
             state: ClientState::Init,
-            tls,
-            vec_file_info,
-            current_file: 0
+            str: Streamer::new(s),
+            items: items.to_vec(),
+            opt_reader: None,
+            sent_size: 0,
+            cur_index: 0,
         }
     }
 
@@ -42,95 +52,105 @@ impl <'a> ClientStateMachine<'a> {
     fn next(&mut self) {
         match self.state {
             ClientState::Init => {
-                match self.write_packet(&SendPacket::new(&self.vec_file_info)) {
+                let infos: Vec<FileInfo> =
+                    self.items.iter().map(|p| FileInfo::from_path(p)).collect();
+                match self.str.write_packet(Packet::Send(infos)) {
                     Ok(_) => self.next_state(ClientState::WaitForResponse),
-                    _ => self.error()
+                    _ => self.error(),
                 }
             }
             ClientState::WaitForResponse => {
-                let mut buf = [0; 1024];
-                let len = self.tls.read(&mut buf).unwrap();
-                if let Some(_) = AcceptPacket::parse(&buf[0..len]) {
-                    self.next_state(ClientState::Accepted)
-                } else if let Some(_) = RejectPacket::parse(&buf[0..len]) {
-                    self.next_state(ClientState::Finish)
+                match self.str.read_packet() {
+                    Ok(Packet::Accept) => self.next_state(ClientState::Accepted),
+                    Ok(Packet::Reject) => self.next_state(ClientState::Finish),
+                    _ => self.error()
                 }
             }
-            ClientState::Accepted => {
-                self.process_start_file()
-            }
+            ClientState::Accepted => self.process_start_file(),
             ClientState::StartSendingFile => {
                 self.process_file_data();
             }
             ClientState::SendFileData => {
-                let eof = false;
-                if !eof {
-                    self.process_file_data();
-                } else {
-                    self.process_end_file();
-                }
+                self.process_file_data();
             }
             ClientState::EndSendingFile => {
-                let fin = self.current_file >= self.total() - 1;
+                let fin = self.cur_index >= self.total() - 1;
                 if !fin {
                     // increase current and continue
-                    self.current_file += 1;
+                    self.cur_index += 1;
                     self.process_start_file()
                 } else {
                     // finish
-                    let finish = FinishPacket::new();
-                    match self.write_packet(&finish) {
+                    match self.str.write_packet(Packet::Finish) {
                         Ok(_) => self.next_state(ClientState::Finish),
-                        Err(_) => self.error()
+                        Err(_) => self.error(),
                     }
                 }
             }
-            ClientState::Finish => {
-                self.close()
-            }
-            ClientState::Error => {
-                self.close()
-            }
+            ClientState::Finish => self.close(),
+            ClientState::Error => self.close(),
         }
     }
 
     fn total(&self) -> usize {
-        return self.vec_file_info.len();
+        return self.items.len();
     }
 
     fn process_start_file(&mut self) {
-        match self.vec_file_info.get(self.current_file) {
-            Some(info) => {
-                let start_file = StartFilePacket::new(
-                    info.clone(),
-                    self.current_file,
-                    self.vec_file_info.len()
-                );
-                match self.write_packet(&start_file) {
-                    Ok(_) => self.next_state(ClientState::StartSendingFile),
-                    Err(_) => self.error()
+        match self.items.get(self.cur_index) {
+            Some(item) => {
+                // read file
+                match File::open(item) {
+                    Ok(file) => {
+                        self.opt_reader = Some(BufReader::new(file));
+                        self.sent_size = 0;
+                    }
+                    Err(_) => {
+                        self.error();
+                        return;
+                    }
                 }
-            }
-            None => self.error()
+
+                // send packet to server
+                let data = StartFileData::new(
+                    FileInfo::from_path(item),
+                    self.cur_index,
+                    self.items.len(),
+                );
+                match self.str.write_packet(Packet::StartFile(data)) {
+                    Ok(_) => self.next_state(ClientState::StartSendingFile),
+                    Err(_) => self.error(),
+                }
+            },
+            None => self.error(),
         }
     }
 
     fn process_file_data(&mut self) {
-        let file_data = FileDataPacket::new();
-        match self.write_packet(&file_data) {
-            Ok(_) => self.next_state(ClientState::SendFileData),
-            Err(_) => self.error()
+        if let Some(reader) = self.opt_reader.as_mut() {
+            let buf = reader.fill_buf().unwrap();
+            let len = buf.len();
+            if len > 0 {
+                let vec: Vec<u8> = buf.iter().map(|b| *b).collect();
+                reader.consume(len);
+                self.sent_size += len;
+                match self.str.write_packet(Packet::FileData(vec)) {
+                    Ok(_) => self.next_state(ClientState::SendFileData),
+                    Err(_) => self.error(),
+                };
+            } else {
+                self.process_end_file();
+            }
         }
     }
-    
+
     fn process_end_file(&mut self) {
-        let end_file = EndFilePacket::new();
-        match self.write_packet(&end_file) {
+        match self.str.write_packet(Packet::EndFile) {
             Ok(_) => self.next_state(ClientState::EndSendingFile),
-            Err(_) => self.error()
+            Err(_) => self.error(),
         }
     }
-    
+
     fn next_state(&mut self, state: ClientState) {
         self.state = state;
         self.next()
@@ -141,12 +161,6 @@ impl <'a> ClientStateMachine<'a> {
     }
 
     fn close(&mut self) {
-        self.tls.flush().expect("failed to close connection")
-    }
-
-    fn write_packet<T>(&mut self, packet: &T) -> Result<usize> where T: PacketAsBytes {
-        let res = self.tls.write(&packet.as_bytes());
-        println!("wrote TCP packet: {:?}", res);
-        res
+        //TODO shutdown
     }
 }

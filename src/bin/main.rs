@@ -1,7 +1,9 @@
-use std::env;
+use std::{env, fs::File};
 
 use getopts::Options;
-use sendfile_cli::{client::ClientStateMachine, common::FileInfo, network::{TcpClient, TcpServer}, server::ServerStateMachine};
+use sendfile_cli::{client::ClientStateMachine, server::ServerStateMachine};
+use sendfile_cli::network::{Network, TlsTcpClient, TlsTcpServer};
+use std::path::PathBuf;
 
 extern crate getopts;
 
@@ -37,15 +39,15 @@ fn main() {
     let port: u32 = m.opt_get("p").unwrap().unwrap();
     if is_server {
         println!("starting server at port: {}", port);
-        let listener = TcpServer::create_tcp_listener(port);
+        let listener = Network::create_tcp_listener(port);
         loop {
             println!("waiting for new TCP connection....");
             let (str, addr) = listener.accept().unwrap();
             println!("accepted new client at: {}", addr);
-            let mut server = TcpServer::new(str);
+            let mut server = TlsTcpServer::new(str);
 
             // state machine
-            let mut sm = ServerStateMachine::new(server.get_tls_str());
+            let mut sm = ServerStateMachine::new(server.create_tls_str());
             sm.start()
         }
         
@@ -53,16 +55,23 @@ fn main() {
     } else if is_client {
         let files = m.opt_strs("f");
         println!("sending files: {:?}", files);
-        let infos: Vec<FileInfo> = files.iter().map(|p| FileInfo::from_path(p)).collect();
-        println!("file info: {:?}", infos);
         if files.is_empty() {
             print_help(prog, &opts);
             panic!("missing input files")
         }
 
+        // check all files are exists
+        let paths: Vec<PathBuf> = files.iter().map(|f| PathBuf::from(f)).collect();
+        for p in &paths {
+            let f = File::open(&p).unwrap();
+            if !f.metadata().unwrap().is_file() {
+                panic!("invalid file: {:?}", p);
+            }
+        }
+
         println!("starting client connect to port: {}", port);
-        let mut client = TcpClient::connect(port);
-        let mut cm = ClientStateMachine::new(client.create_tls_str(), infos);
+        let mut client = TlsTcpClient::connect(port);
+        let mut cm = ClientStateMachine::new(client.create_tls_str(), &paths);
         cm.start()
     }
 }
