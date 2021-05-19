@@ -50,50 +50,54 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
 
     /// state machine
     fn next(&mut self) {
-        match self.state {
-            ClientState::Init => {
-                let infos: Vec<FileInfo> =
-                    self.items.iter().map(|p| FileInfo::from_path(p)).collect();
-                match self.str.write_packet(Packet::Send(infos)) {
-                    Ok(_) => self.next_state(ClientState::WaitForResponse),
-                    _ => self.error(),
-                }
-            }
-            ClientState::WaitForResponse => {
-                match self.str.read_packet() {
-                    Ok(Packet::Accept) => self.next_state(ClientState::Accepted),
-                    Ok(Packet::Reject) => self.next_state(ClientState::Finish),
-                    _ => self.error()
-                }
-            }
-            ClientState::Accepted => self.process_start_file(),
-            ClientState::StartSendingFile => {
-                self.process_file_data();
-            }
-            ClientState::SendFileData => {
-                self.process_file_data();
-            }
-            ClientState::EndSendingFile => {
-                let fin = self.cur_index >= self.total() - 1;
-                if !fin {
-                    // increase current and continue
-                    self.cur_index += 1;
-                    self.process_start_file()
-                } else {
-                    // finish
-                    match self.str.write_packet(Packet::Finish) {
-                        Ok(_) => self.next_state(ClientState::Finish),
-                        Err(_) => self.error(),
+        loop {
+            match self.state {
+                ClientState::Init => {
+                    let infos: Vec<FileInfo> =
+                        self.items.iter().map(|p| FileInfo::from_path(p)).collect();
+                    match self.str.write_packet(Packet::Send(infos)) {
+                        Ok(_) => self.state = ClientState::WaitForResponse,
+                        _ => self.error(),
                     }
                 }
+                ClientState::WaitForResponse => {
+                    match self.str.read_packet() {
+                        Ok(Packet::Accept) => self.state = ClientState::Accepted,
+                        Ok(Packet::Reject) => self.state = ClientState::Finish,
+                        _ => self.error()
+                    }
+                }
+                ClientState::Accepted => self.process_start_file(),
+                ClientState::StartSendingFile => {
+                    self.process_file_data();
+                }
+                ClientState::SendFileData => {
+                    self.process_file_data();
+                }
+                ClientState::EndSendingFile => {
+                    let fin = self.cur_index >= self.total() - 1;
+                    if !fin {
+                        // increase current and continue
+                        self.cur_index += 1;
+                        self.process_start_file()
+                    } else {
+                        // finish
+                        match self.str.write_packet(Packet::Finish) {
+                            Ok(_) => self.state = ClientState::Finish,
+                            Err(_) => self.error(),
+                        }
+                    }
+                }
+                ClientState::Finish => break,
+                ClientState::Error => break,
             }
-            ClientState::Finish => self.close(),
-            ClientState::Error => self.close(),
         }
+
+        self.close()
     }
 
     fn total(&self) -> usize {
-        return self.items.len();
+        self.items.len()
     }
 
     fn process_start_file(&mut self) {
@@ -102,7 +106,7 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
                 // read file
                 match File::open(item) {
                     Ok(file) => {
-                        self.opt_reader = Some(BufReader::new(file));
+                        self.opt_reader = Some(BufReader::with_capacity(61 * 1024, file));
                         self.sent_size = 0;
                     }
                     Err(_) => {
@@ -118,7 +122,7 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
                     self.items.len(),
                 );
                 match self.str.write_packet(Packet::StartFile(data)) {
-                    Ok(_) => self.next_state(ClientState::StartSendingFile),
+                    Ok(_) => self.state = ClientState::StartSendingFile,
                     Err(_) => self.error(),
                 }
             },
@@ -135,7 +139,7 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
                 reader.consume(len);
                 self.sent_size += len;
                 match self.str.write_packet(Packet::FileData(vec)) {
-                    Ok(_) => self.next_state(ClientState::SendFileData),
+                    Ok(_) => self.state = ClientState::SendFileData,
                     Err(_) => self.error(),
                 };
             } else {
@@ -146,18 +150,13 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
 
     fn process_end_file(&mut self) {
         match self.str.write_packet(Packet::EndFile) {
-            Ok(_) => self.next_state(ClientState::EndSendingFile),
+            Ok(_) => self.state = ClientState::EndSendingFile,
             Err(_) => self.error(),
         }
     }
 
-    fn next_state(&mut self, state: ClientState) {
-        self.state = state;
-        self.next()
-    }
-
     fn error(&mut self) {
-        self.next_state(ClientState::Error)
+        self.state = ClientState::Error
     }
 
     fn close(&mut self) {

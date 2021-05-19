@@ -42,72 +42,76 @@ impl<S> ServerStateMachine<S> where S: Read + Write {
     /// state machine for server (receiver)
     fn next(&mut self) {
         println!("process state: {:?}", self.state);
-        match self.state {
-            ServerState::Init => {
-                // reset
-                self.files.clear();
+        loop {
+            match self.state {
+                ServerState::Init => {
+                    // reset
+                    self.files.clear();
 
-                // parse packet
-                match self.str.read_packet() {
-                    Ok(Packet::Send(data)) => {
-                        data
-                            .iter()
-                            .for_each(|f| self.files.push(f.clone()));
-                        self.next_state(ServerState::InternalAnswer)
+                    // parse packet
+                    match self.str.read_packet() {
+                        Ok(Packet::Send(data)) => {
+                            data
+                                .iter()
+                                .for_each(|f| self.files.push(f.clone()));
+                            self.state = ServerState::InternalAnswer;
+                        }
+                        _ => self.error()
                     }
-                    _ => self.error()
                 }
-            }
-            ServerState::InternalAnswer => {
-                println!("internal answer for request: {:?}", self.files);
+                ServerState::InternalAnswer => {
+                    println!("internal answer for request: {:?}", self.files);
 
-                // send accept of cancel
-                let is_accepted = true;
-                if is_accepted {
-                    match self.str.write_packet(Packet::Accept) {
-                        Ok(_) => self.next_state(ServerState::WaitForFile),
-                        Err(_) => self.error()
+                    // send accept of cancel
+                    let is_accepted = true;
+                    if is_accepted {
+                        match self.str.write_packet(Packet::Accept) {
+                            Ok(_) => self.state = ServerState::WaitForFile,
+                            Err(_) => self.error()
+                        }
+                    } else {
+                        match self.str.write_packet(Packet::Reject) {
+                            Ok(_) => self.state = ServerState::Finish,
+                            Err(_) => self.error()
+                        }
+                    };
+                }
+                ServerState::WaitForFile => {
+                    match self.str.read_packet() {
+                        Ok(Packet::StartFile(data)) => self.process_start_file(data),
+                        _ => self.error(),
                     }
-                } else {
-                    match self.str.write_packet(Packet::Reject) {
-                        Ok(_) => self.next_state(ServerState::Finish),
-                        Err(_) => self.error()
+                }
+                ServerState::StartReceivingFile => {
+                    match self.str.read_packet() {
+                        Ok(Packet::FileData(data)) => self.process_file_data(data),
+                        _ => self.error(),
                     }
-                };
-            }
-            ServerState::WaitForFile => {
-                match self.str.read_packet() {
-                    Ok(Packet::StartFile(data)) => self.process_start_file(data),
-                    _ => self.error(),
                 }
-            }
-            ServerState::StartReceivingFile => {
-                match self.str.read_packet() {
-                    Ok(Packet::FileData(data)) => self.process_file_data(data),
-                    _ => self.error(),
+                ServerState::ReceiveFileData => {
+                    match self.str.read_packet() {
+                        Ok(Packet::EndFile) => self.process_end_file(),
+                        Ok(Packet::FileData(data)) => self.process_file_data(data),
+                        _ => self.error(),
+                    }
                 }
-            }
-            ServerState::ReceiveFileData => {
-                match self.str.read_packet() {
-                    Ok(Packet::EndFile) => self.process_end_file(),
-                    Ok(Packet::FileData(data)) => self.process_file_data(data),
-                    _ => self.error(),
+                ServerState::EndReceivingFile => {
+                    match self.str.read_packet() {
+                        Ok(Packet::StartFile(data)) => self.process_start_file(data),
+                        Ok(Packet::Finish) => self.state = ServerState::Finish,
+                        _ => self.error(),
+                    }
                 }
-            }
-            ServerState::EndReceivingFile => {
-                match self.str.read_packet() {
-                    Ok(Packet::StartFile(data)) => self.process_start_file(data),
-                    Ok(Packet::Finish) => self.next_state(ServerState::Finish),
-                    _ => self.error(),
+                ServerState::Finish => {
+                    break
                 }
-            }
-            ServerState::Finish => {
-                self.close()
-            }
-            ServerState::Error => {
-                self.close()
+                ServerState::Error => {
+                    break
+                }
             }
         }
+
+        self.close()
     }
 
     fn process_start_file(&mut self, data: StartFileData) {
@@ -120,13 +124,13 @@ impl<S> ServerStateMachine<S> where S: Read + Write {
             .unwrap();
         
         self.opt_writer = Some(BufWriter::new(opts));
-        self.next_state(ServerState::StartReceivingFile)
+        self.state = ServerState::StartReceivingFile
     }
 
     fn process_file_data(&mut self, data: Vec<u8>) {
         if let Some(writer) = self.opt_writer.as_mut() {
             match writer.write(&data) {
-                Ok(_) => self.next_state(ServerState::ReceiveFileData),
+                Ok(_) => self.state = ServerState::ReceiveFileData,
                 Err(_) => self.error()
             }
         } else {
@@ -137,17 +141,12 @@ impl<S> ServerStateMachine<S> where S: Read + Write {
     fn process_end_file(&mut self) {
         if let Some(writer) = self.opt_writer.as_mut() {
             writer.flush().unwrap();
-            self.next_state(ServerState::EndReceivingFile)
+            self.state = ServerState::EndReceivingFile
         }
     }
 
-    fn next_state(&mut self, state: ServerState) {
-        self.state = state;
-        self.next()
-    }
-
     fn error(&mut self) {
-        self.next_state(ServerState::Error)
+        self.state = ServerState::Error
     }
 
     fn close(&mut self) {

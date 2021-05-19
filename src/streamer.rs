@@ -47,7 +47,7 @@ impl <S: Read + Write> Streamer<S> {
         } else {
             vec![]
         };
-        println!("received packet: {}, len: {}", action, len);
+        println!("received packet: {}, data len: {}", action, len);
         Packet::from_data(action, &data_buf)
     }
 
@@ -62,7 +62,7 @@ impl <S: Read + Write> Streamer<S> {
         vec.push(action);
         len.to_le_bytes().iter().for_each(|b|vec.push(*b));
         data.iter().for_each(|b|vec.push(*b));
-        println!("sent packet: {}, len: {}", action, len);
+        println!("sent packet: {}, data len: {}", action, len);
         vec
     }
 
