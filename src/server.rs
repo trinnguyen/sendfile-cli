@@ -2,6 +2,7 @@ use crate::packet::file_info::FileInfo;
 use crate::packet::start_file::StartFileData;
 use crate::packet::Packet;
 use crate::streamer::Streamer;
+use log::debug;
 use std::{
     fs::{File, OpenOptions},
     io::{BufWriter, Read, Write},
@@ -51,7 +52,7 @@ where
 
     /// state machine for server (receiver)
     fn next(&mut self) {
-        println!("process state: {:?}", self.state);
+        debug!("process state: {:?}", self.state);
         loop {
             match self.state {
                 ServerState::Init => {
@@ -68,7 +69,7 @@ where
                     }
                 }
                 ServerState::InternalAnswer => {
-                    println!("internal answer for request: {:?}", self.files);
+                    debug!("internal answer for request: {:?}", self.files);
 
                     // send accept of cancel
                     let is_accepted = true;
@@ -111,7 +112,7 @@ where
     }
 
     fn process_start_file(&mut self, data: StartFileData) {
-        println!("start receiving file: {:?}", data);
+        debug!("start receiving file: {:?}", data);
         let path = Path::new("out").join(data.file_info.name);
         let opts = OpenOptions::new()
             .write(true)

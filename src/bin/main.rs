@@ -1,20 +1,34 @@
-use std::{env};
+use std::env;
 
-use getopts::Options;
+use getopts::{HasArg, Occur, Options};
 use sendfile_cli::driver::{client_send_files, ServerDriver};
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 extern crate getopts;
 
 fn main() {
+    env_logger::init();
+
     let args: Vec<String> = env::args().collect();
     let prog = args.first().unwrap();
-    println!("{:?}", args);
-    
+
     let mut opts = Options::new();
-    opts.optflag("s", "", "run as server");
-    opts.optflag("c", "", "run as client");
-    opts.reqopt("p", "", "port", "PORT");
+    opts.opt(
+        "s",
+        "server",
+        "start server with port (example: -s 8080)",
+        "PORT",
+        HasArg::Yes,
+        Occur::Optional,
+    );
+    opts.opt(
+        "c",
+        "client",
+        "connect to server",
+        "SERVER_ADDRESS (example: -c 127.0.0.1:8080)",
+        HasArg::Yes,
+        Occur::Optional,
+    );
     opts.optmulti("f", "", "selected file (for client)", "FILE");
 
     // parse
@@ -29,27 +43,27 @@ fn main() {
     // print
     let is_server = m.opt_present("s");
     let is_client = m.opt_present("c");
-    if !is_server && !is_client {
-        print_help(prog, &opts);
-        panic!("Required -s for server or -c for client")
-    }
-
-    // start as server
-    let port: u16 = m.opt_get("p").unwrap().unwrap();
-    if is_server {
-        println!("starting server at port: {}", port);
-        let server = ServerDriver::create_server(port);
-        loop {
-            server.accept_conn()
-        }
-
-    } else if is_client {
-        let paths: Vec<PathBuf> = m.opt_strs("f").iter().map(PathBuf::from).collect();
-        if paths.is_empty() {
+    match (is_server, is_client) {
+        (false, false) => {
             print_help(prog, &opts);
-            panic!("Required -f for client")
+            panic!("Required -s for server or -c for client")
         }
-        client_send_files(paths, port);
+        (true, _) => {
+            let port: u16 = m.opt_get("s").unwrap().unwrap();
+            let server = ServerDriver::create_server(port);
+            loop {
+                server.accept_conn()
+            }
+        }
+        (_, true) => {
+            let paths: Vec<PathBuf> = m.opt_strs("f").iter().map(PathBuf::from).collect();
+            if paths.is_empty() {
+                print_help(prog, &opts);
+                panic!("Required -f for client")
+            }
+            let addr: String = m.opt_get("c").unwrap().unwrap();
+            client_send_files(paths, addr);
+        }
     }
 }
 

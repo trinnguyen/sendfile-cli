@@ -1,3 +1,4 @@
+use log::debug;
 use std::{net::TcpStream, sync::Arc};
 
 use rcgen::generate_simple_self_signed;
@@ -25,7 +26,7 @@ impl TlsTcpServer {
         config
             .set_single_cert(vec![cert], private_key)
             .expect("bad certificates/private key");
-        println!(
+        debug!(
             "TLSv1_3: {}",
             config.supports_version(ProtocolVersion::TLSv1_3)
         );
@@ -52,7 +53,7 @@ impl TlsTcpClient {
         config
             .dangerous()
             .set_certificate_verifier(Arc::new(danger::NoCertificateVerification {}));
-        println!(
+        debug!(
             "TLSv1_3: {}",
             config.supports_version(ProtocolVersion::TLSv1_3)
         );

@@ -58,10 +58,10 @@ stateDiagram-v2
 ## Run examples
 - Run server
     ```
-    cargo run -- -s -p 7878
+    RUST_LOG=debug cargo run -- -s 7878
     ```
 
 - Run client
     ```
-    cargo run -- -c -p 7878 -f test-data/file1.txt -f test-data/file2.txt
+    RUST_LOG=debug cargo run -- -c 127.0.0.1:7878 -f test-data/file1.txt -f test-data/file2.txt
     ```
