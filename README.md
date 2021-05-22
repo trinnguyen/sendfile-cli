@@ -1,7 +1,8 @@
-# medusa-li
+# sendfile-cli
 
 ## Overview
-- Send files securely via TCP/TLS 1.3 in local network
+- Send files securely via TCP/TLS 1.3 in local network (no Internet needed)
+- Automatically generate TLS private/public keys pair for each connection
 
 ## Process
 - Each receiver runs a TCP server to listen for connections from sender
@@ -9,13 +10,19 @@
 - Custom protocol for TCP packets:
 
 ```
-    <package> := <package_type> <data>?
+    <package> := <package_type> <data-length> <data>?
     <package_type> := Send | Accept | Reject | StartFile | EndFile | FileData | Finish
+    <data-length> := NUMBER
     <data> := FileInfo[] | Byte[]
 ```
 
+- Length
+    - <package_type>: 1 byte (number range from 0..2^8)
+    - <data-length>: 2 bytes (number range from 0..2^16)
+    - <data>: byte array (maximum 61 bytes)
 
-## State machines
+
+## State machines (mermaid)
 
 ### Receiver (or server)
 
@@ -47,3 +54,14 @@ stateDiagram-v2
     EndSendingFile --> StartSendingFile: StartFile!
     EndSendingFile --> Finish: Finish!
 ```
+
+## Run examples
+- Run server
+    ```
+    cargo run -- -s -p 7878
+    ```
+
+- Run client
+    ```
+    cargo run -- -c -p 7878 -f test-data/file1.txt -f test-data/file2.txt
+    ```
