@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::BufReader,
-    net::{TcpListener, TcpStream},
+    net::{TcpStream},
     sync::Arc,
 };
 
@@ -9,26 +9,7 @@ use rustls::{
     ClientConnection, NoClientAuth, ProtocolVersion, RootCertStore, ServerConfig, ServerConnection,
     Stream,
 };
-
-pub struct PlainTcpStream {
-    str: TcpStream
-}
-
-impl PlainTcpStream {
-
-    pub fn new_client(port: u32) -> Self {
-        let str = TcpStream::connect(Network::get_addr(port)).unwrap();
-        PlainTcpStream::new(str)
-    }
-
-    pub fn new(str: TcpStream) -> Self {
-        PlainTcpStream { str }
-    }
-
-    pub fn get_stream(&self) -> &TcpStream {
-        &self.str
-    }
-}
+use std::net::SocketAddr;
 
 pub struct TlsTcpServer {
     str: TcpStream,
@@ -95,8 +76,8 @@ pub struct TlsTcpClient {
 }
 
 impl TlsTcpClient {
-    pub fn connect(port: u32) -> Self {
-        let str = TcpStream::connect(Network::get_addr(port)).unwrap();
+    pub fn connect(addr: SocketAddr) -> Self {
+        let str = TcpStream::connect(addr).unwrap();
         let certfile = fs::File::open("certs/ca-cert.pem").expect("Cannot open CA file");
         let mut reader = BufReader::new(certfile);
         let pemfile = rustls_pemfile::certs(&mut reader).unwrap();
@@ -117,17 +98,5 @@ impl TlsTcpClient {
 
     pub fn create_tls_str(&mut self) -> Stream<ClientConnection, TcpStream> {
         Stream::new(&mut self.conn, &mut self.str)
-    }
-}
-
-pub struct Network {}
-
-impl<'a> Network {
-    pub fn create_tcp_listener(port: u32) -> TcpListener {
-        TcpListener::bind(Network::get_addr(port)).expect("cannot start TCP")
-    }
-
-    fn get_addr(port: u32) -> String {
-        format!("0.0.0.0:{}", port)
     }
 }
