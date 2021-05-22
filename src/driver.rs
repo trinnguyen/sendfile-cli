@@ -1,7 +1,7 @@
-use crate::network::{TlsTcpServer, TlsTcpClient};
+use crate::tls::{TlsTcpServer, TlsTcpClient};
 use std::net::{TcpListener, SocketAddr, IpAddr, Ipv4Addr};
 use crate::server::ServerStateMachine;
-use std::path::PathBuf;
+use std::path::{PathBuf};
 use std::fs::File;
 use crate::client::ClientStateMachine;
 
@@ -11,6 +11,7 @@ pub struct ServerDriver {
 
 impl ServerDriver {
     pub fn create_server(port: u16) -> Self {
+        // start TCP
         let listener = TcpListener::bind(create_localhost_addr(port)).expect("cannot start TCP");
         ServerDriver {
             listener
@@ -29,11 +30,10 @@ impl ServerDriver {
     }
 }
 
-pub fn client_send_files(files: Vec<String>, port: u16) {
-    println!("sending files: {:?}", files);
+pub fn client_send_files(paths: Vec<PathBuf>, port: u16) {
+    println!("sending files: {:?}", paths);
 
     // check all files are exists
-    let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
     for p in &paths {
         let f = File::open(&p).unwrap();
         if !f.metadata().unwrap().is_file() {

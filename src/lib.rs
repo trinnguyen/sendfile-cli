@@ -1,6 +1,6 @@
 mod server;
 mod client;
-mod network;
+mod tls;
 mod packet;
 mod streamer;
 pub mod driver;

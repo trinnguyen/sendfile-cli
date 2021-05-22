@@ -1,14 +1,13 @@
-
+use crate::packet::file_info::FileInfo;
+use crate::packet::start_file::StartFileData;
+use crate::packet::Packet;
+use crate::streamer::Streamer;
+use std::path::PathBuf;
 use std::{
     fs::File,
     io::{BufRead, BufReader, Read, Write},
     usize,
 };
-use crate::streamer::Streamer;
-use crate::packet::file_info::FileInfo;
-use crate::packet::packet::Packet;
-use crate::packet::start_file::StartFileData;
-use std::path::PathBuf;
 
 enum ClientState {
     Init, // ask for sending files
@@ -21,7 +20,10 @@ enum ClientState {
     Error,
 }
 
-pub struct ClientStateMachine<S> where S: Read + Write {
+pub struct ClientStateMachine<S>
+where
+    S: Read + Write,
+{
     state: ClientState,
     str: Streamer<S>,
     items: Vec<PathBuf>,
@@ -30,7 +32,10 @@ pub struct ClientStateMachine<S> where S: Read + Write {
     cur_index: usize,
 }
 
-impl<S> ClientStateMachine<S> where S: Read + Write {
+impl<S> ClientStateMachine<S>
+where
+    S: Read + Write,
+{
     pub fn new(s: S, items: &[PathBuf]) -> Self {
         ClientStateMachine {
             state: ClientState::Init,
@@ -60,13 +65,11 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
                         _ => self.error(),
                     }
                 }
-                ClientState::WaitForResponse => {
-                    match self.str.read_packet() {
-                        Ok(Packet::Accept) => self.state = ClientState::Accepted,
-                        Ok(Packet::Reject) => self.state = ClientState::Finish,
-                        _ => self.error()
-                    }
-                }
+                ClientState::WaitForResponse => match self.str.read_packet() {
+                    Ok(Packet::Accept) => self.state = ClientState::Accepted,
+                    Ok(Packet::Reject) => self.state = ClientState::Finish,
+                    _ => self.error(),
+                },
                 ClientState::Accepted => self.process_start_file(),
                 ClientState::StartSendingFile => {
                     self.process_file_data();
@@ -116,16 +119,13 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
                 }
 
                 // send packet to server
-                let data = StartFileData::new(
-                    FileInfo::from_path(item),
-                    self.cur_index,
-                    self.items.len(),
-                );
+                let data =
+                    StartFileData::new(FileInfo::from_path(item), self.cur_index, self.items.len());
                 match self.str.write_packet(Packet::StartFile(data)) {
                     Ok(_) => self.state = ClientState::StartSendingFile,
                     Err(_) => self.error(),
                 }
-            },
+            }
             None => self.error(),
         }
     }
@@ -135,7 +135,7 @@ impl<S> ClientStateMachine<S> where S: Read + Write {
             let buf = reader.fill_buf().unwrap();
             let len = buf.len();
             if len > 0 {
-                let vec: Vec<u8> = buf.iter().map(|b| *b).collect();
+                let vec: Vec<u8> = buf.iter().copied().collect();
                 reader.consume(len);
                 self.sent_size += len;
                 match self.str.write_packet(Packet::FileData(vec)) {

@@ -2,6 +2,7 @@ use std::{env};
 
 use getopts::Options;
 use sendfile_cli::driver::{client_send_files, ServerDriver};
+use std::path::{PathBuf};
 
 extern crate getopts;
 
@@ -14,7 +15,7 @@ fn main() {
     opts.optflag("s", "", "run as server");
     opts.optflag("c", "", "run as client");
     opts.reqopt("p", "", "port", "PORT");
-    opts.optmulti("f", "", "selected file", "FILE");
+    opts.optmulti("f", "", "selected file (for client)", "FILE");
 
     // parse
     let m = match opts.parse(&args[1..]) {
@@ -43,12 +44,12 @@ fn main() {
         }
 
     } else if is_client {
-        let files = m.opt_strs("f");
-        if files.is_empty() {
+        let paths: Vec<PathBuf> = m.opt_strs("f").iter().map(PathBuf::from).collect();
+        if paths.is_empty() {
             print_help(prog, &opts);
             panic!("Required -f for client")
         }
-        client_send_files(files, port);
+        client_send_files(paths, port);
     }
 }
 
